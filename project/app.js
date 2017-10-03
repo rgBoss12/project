@@ -25,14 +25,15 @@ var Entity = function(){
 		self.updatePosition();
 	}
 	self.updatePosition = function(){
-		self.x += spdX;
-		self.Y += spdY;
+		self.x += self.spdX;
+		self.y += self.spdY;
 	}
 	return self;
 }
 
 var Player = function(id){
 	var self = Entity();
+	self.id = id;
 	self.number = "" + Math.floor(10 * Math.random());
 	self.pressingRight = false;
 	self.pressingLeft = false;
@@ -66,42 +67,96 @@ var Player = function(id){
 }
 Player.list = {};
 
-var io = require('socket.io')(serv,{});
-io.sockets.on('connection', function(socket){
-	socket.id = Math.random();
-	SOCKET_LIST[socket.id] = socket;
-
+Player.onConnect = function(socket){
 	var player = Player(socket.id);
-	
-	socket.on('disconnect', function(){
-		delete SOCKET_LIST[socket.id];
-		delete Player.list[socket.id];
-	});
-
 	socket.on('keyPress', function(data){
 		if(data.inputId === 'l')
 			player.pressingLeft = data.state;
-		if(data.inputId === 'r')
+		else if(data.inputId === 'r')
 			player.pressingRight = data.state;
-		if(data.inputId === 'd')
+		else if(data.inputId === 'd')
 			player.pressingDown = data.state;
-		if(data.inputId === 'u')
+		else if(data.inputId === 'u')
 			player.pressingUp = data.state;
 	});
 
-});
+}
 
-setInterval(function(){
+Player.onDisconnect = function(socket){
+	delete Player.list[socket.id];
+}
+
+Player.update = function(){
 	var pack = [];
-	for(var i in PLAYER_LIST){
-		var player = PLAYER_LIST[i];
-		player.updatePosition();
+	for(var i in Player.list){
+		var player = Player.list[i];
+		player.update();
 		pack.push({
 			x:player.x,
 			y:player.y,
 			number:player.number
 		});
 	}
+	return pack;
+}
+
+var Bullet = function(angle){
+	var self = Entity();
+	self.id = Math.random();
+	self.spdX = Math.cos(angle/180*Math.PI)*10;
+	self.spdY = Math.sin(angle/180*Math.PI)*10;
+
+	self.timer = 0;
+	self.toRemove = false;
+	var super_update = self.update;
+	self.update = function(){
+		if(self.timer++ > 100)
+			self.toRemove = true;
+		super_update();
+	}
+
+	Bullet.list[self.id] = self;
+	return self;
+}
+
+Bullet.list = {};
+
+Bullet.update = function(){
+	if(Math.random() < 0.1){
+		Bullet(Math.random()*360);
+	}
+
+	var pack = [];
+	for(var i in Bullet.list){
+		var bullet = Bullet.list[i];
+		bullet.update();
+		pack.push({
+			x:bullet.x,
+			y:bullet.y,
+		});
+	}
+	return pack;
+}
+
+var io = require('socket.io')(serv,{});
+io.sockets.on('connection', function(socket){
+	socket.id = Math.random();
+	SOCKET_LIST[socket.id] = socket;
+
+	Player.onConnect(socket);
+	
+	socket.on('disconnect', function(){
+		delete SOCKET_LIST[socket.id];
+		Player.onDisconnect(socket);
+	});
+});
+
+setInterval(function(){
+	var pack = {
+		player:Player.update(),
+		bullet:Bullet.update(),
+	}
+	
 	for(var i in SOCKET_LIST){
 		var socket = SOCKET_LIST[i];
 		socket.emit('newPositions', pack);
